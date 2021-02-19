@@ -12,7 +12,7 @@ module.exports = {
                 if (tagDoc != null) {
                     newTags.push(tagDoc._id)
                 } else {
-                    throw new Error('Tag not found')
+                    throw new Error('Couldn\'t find tag ' + tag)
                 }
             }
         }

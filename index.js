@@ -11,14 +11,18 @@ app.use(require('body-parser').json())
 
 app.put('/item', async (req, res) => {
     try {
-        const { id, name, quantity = 1, meta = {}, tags = [] } = req.body;
+        let { id, name, quantity = 1, meta = {}, tags = [], area } = req.body;
         const parsedTags = await parseTags(tags)
+        if (Number.isInteger(area)) {
+            area = (await Area.findOne({id: area}))._id;
+        }
         const item = new Item({
             id,
             name,
             quantity,
             tags: parsedTags,
-            meta
+            meta,
+            area
         })
         const newDoc = await item.save()
         Success(res, {
@@ -44,8 +48,17 @@ app.get('/item', async (req, res) => {
                 $all: await parseTags(req.body.tags)
             }
         }
+        if (req.body.area) {
+            let area = req.body.area
+            if (Number.isInteger(area)) {
+                area = (await Area.findOne({id: area}))._id;
+            }
+            queryDoc.area = mongoose.Types.ObjectId(area)
+        }
         if (req.body.name) {
-            queryDoc.name = req.body.name
+            queryDoc.$text = {
+                $search: req.body.name
+            }
         }
         const items = await Item.find(queryDoc)
         Success(res, {
@@ -79,7 +92,7 @@ app.put('/tag', async (req, res) => {
     }
 })
 
-app.get('/tags', async (req, res) => {
+app.get('/tag', async (req, res) => {
     try {
         let queryDoc = {}
         if (req.body.name) {
@@ -98,6 +111,44 @@ app.get('/tags', async (req, res) => {
     } catch (e) {
         Error(res, {
             error: e
+        })
+    }
+})
+
+app.put('/area', async (req, res) => {
+    try {
+        const { name, id, parent } = req.body;
+        const newDoc = new Area({
+            name,
+            id
+        });
+        let parentDoc;
+        if (parent) {
+            let parentQuery = {}
+            if (Number.isInteger(parent)) {
+                parentQuery.id = parent;
+            } else {
+                parentQuery._id = parent;
+            }
+            parentDoc = await Area.findOne(parentQuery)
+            newDoc.parent = mongoose.Types.ObjectId(parentDoc._id)
+        }
+        await newDoc.save()
+        if (parentDoc) {
+            await Area.updateOne(parentDoc, {
+                $addToSet: {
+                    children: mongoose.Types.ObjectId(newDoc._id)
+                }
+            })
+        }
+        Success(res, {
+            body: {
+                created: newDoc
+            }
+        })
+    } catch (error) {
+        Error(res, {
+            error
         })
     }
 })

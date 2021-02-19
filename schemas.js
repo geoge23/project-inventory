@@ -5,7 +5,7 @@ const { Schema, Error: mongooseError } = require('mongoose');
 module.exports = {
     Item: mongoose.model('items', {
         id: { type: Number, unique: true, required: true },
-        name: { type: String, required: true },
+        name: { type: String, required: true, text: true },
         quantity: { type: Number, default: 1 },
         checkoutHistory: [{
             userID: { type: Schema.Types.ObjectId, ref: 'users' },
@@ -14,15 +14,16 @@ module.exports = {
             quantity: Number
         }],
         meta: Object,
-        area: { type: Schema.Types.ObjectId, ref: 'areas' },
+        area: { type: Schema.Types.ObjectId, ref: 'areas', required: true },
         tags: [{ type: Schema.Types.ObjectId, ref: 'tags' }],
         dateAdded: { type: Date, default: Date.now() }
     }),
     Area: mongoose.model('areas', {
         name: String,
         id: { type: Number, unique: true },
-        level: Number,
         children: [{ type: Schema.Types.ObjectId, ref: 'tags' }],
+        parent: { type: Schema.Types.ObjectId, ref: 'tags' },
+        meta: Object
     }),
     Tag: mongoose.model('tags', {
         name: { type: String, unique: true, required: true }
@@ -38,9 +39,11 @@ module.exports = {
         } else if (error instanceof MongoError && error.code == 11000) {
             code = 409;
             message = 'This element already exists';
-        } else if (error.toString() == "Error: Tag not found") {
+        } else if (error.toString().indexOf('Couldn\'t find tag') != -1) {
             code = 400;
             message = error.toString()
+        } else {
+            console.log(error.toString(), error.stack)
         }
         res.status(code).send({
             status: 'error',
