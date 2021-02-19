@@ -17,5 +17,12 @@ module.exports = {
             }
         }
         return newTags;
+    },
+    parseID(id, queryDoc) {
+        if (Number.isInteger(id)) {
+            queryDoc.id = id
+        } else {
+            queryDoc._id = Types.ObjectId(id)
+        }
     }
 }

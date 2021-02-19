@@ -2,7 +2,7 @@ const express = require('express')
 const mongoose = require('mongoose')
 require('dotenv').config()
 const {Item, Area, Tag, User, Error, Success} = require('./schemas')
-const { parseTags } = require('./functions')
+const { parseTags, parseID } = require('./functions')
 
 mongoose.connect(process.env.MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true })
 
@@ -24,10 +24,12 @@ app.put('/item', async (req, res) => {
             meta,
             area
         })
-        const newDoc = await item.save()
+        await item.save()
         Success(res, {
             code: 201,
-            changes: newDoc
+            body: {
+                changes: item
+            }
         })
     } catch (e) {
         Error(res, {
@@ -40,6 +42,9 @@ app.put('/item', async (req, res) => {
 app.get('/item', async (req, res) => {
     try {
         const queryDoc = {};
+        if (req.body.orphaned) {
+            queryDoc.area = null;
+        }
         if (req.body.id) {
             queryDoc.id = req.body.id
         }
@@ -115,6 +120,36 @@ app.get('/tag', async (req, res) => {
     }
 })
 
+app.delete('/tag', async (req, res) => {
+    try {
+        let queryDoc = {}
+        if (req.body.name) {
+            queryDoc.name = req.body.name
+        }
+        if (req.body.id) {
+            queryDoc._id = mongoose.Types.ObjectId(req.body.id)
+        }
+        const tag = await Tag.findOne(queryDoc)
+        const id = tag._id
+        const itemQueryDoc = {
+            tags: {
+                $all: [id]
+            }
+        }
+        await Item.updateMany(itemQueryDoc, {
+            $pull: {
+                tags: id
+            }
+        })
+        await Tag.deleteOne(tag)
+        Success(res, {
+            message: `Tag ${id} deleted`
+        })
+    } catch (error) {
+        Error(res, {error})
+    }
+})
+
 app.put('/area', async (req, res) => {
     try {
         const { name, id, parent } = req.body;
@@ -144,6 +179,87 @@ app.put('/area', async (req, res) => {
         Success(res, {
             body: {
                 created: newDoc
+            }
+        })
+    } catch (error) {
+        Error(res, {
+            error
+        })
+    }
+})
+
+app.delete('/area', async (req, res) => {
+    try {
+        const { id } = req.body;
+        const queryDoc = {}
+        if (Number.isInteger(id)) {
+            queryDoc.id = id
+        } else {
+            queryDoc._id = mongoose.Types.ObjectId(id)
+        }
+        const recursiveDelete = async (docQuery) => {
+            const doc = await Area.findOne(docQuery)
+            if (!doc) {
+                Error(res, {
+                    message: 'Area doesn\'t exist',
+                    code: 400
+                })
+                return;
+            }
+            Item.updateMany({
+                area: mongoose.Types.ObjectId(doc._id)
+            }, {
+                $set: {
+                    area: null
+                }
+            })
+            if (doc && doc.children.length > 0) {
+                doc.children.forEach(async e => {
+                    recursiveDelete({
+                        _id: mongoose.Types.ObjectId(e)
+                    })
+                })
+            }
+            await Area.deleteOne(doc)
+        }
+        await recursiveDelete(queryDoc)
+        Success(res, {
+            message: `Deleted doc(s)`
+        })
+    } catch (error) {
+        Error(res, {
+            error
+        })
+    }
+})
+
+app.get('/area', async (req, res) => {
+    try {
+        const queryDoc = {}
+        if (req.body.topLevel) {
+            queryDoc.parent = {
+                $exists: false
+            }
+        }
+        if (req.body.bottomLevel) {
+            queryDoc.children = {
+                $size: 0
+            }
+        }
+        if (req.body.id) {
+            parseID(req.body.id, queryDoc)
+        }
+        if (req.body.parent && !req.body.topLevel) {
+            if (Number.isInteger(req.body.parent)) {
+                queryDoc.parent = (await Area.findOne({id: req.body.parent}))._id
+            } else {
+                queryDoc.parent = mongoose.Types.ObjectId(req.body.parent)
+            }
+        }
+        const response = await Area.find(queryDoc)
+        Success(res, {
+            body: {
+                response
             }
         })
     } catch (error) {
