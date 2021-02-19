@@ -28,7 +28,7 @@ app.put('/item', async (req, res) => {
         Success(res, {
             code: 201,
             body: {
-                changes: item
+                created: item
             }
         })
     } catch (e) {
@@ -75,6 +75,40 @@ app.get('/item', async (req, res) => {
         Error(res, {
             error: e
         })
+    }
+})
+
+app.patch('/item', async (req, res) => {
+    try {
+        let { id, tags, area, name } = req.body;
+        const queryDoc = {}
+        parseID(id, queryDoc)
+        const updateDoc = {}
+        if (tags && tags instanceof Array) {
+            const newTags = await parseTags(tags)
+            updateDoc.$addToSet = {
+                tags: newTags
+            }
+        }
+        if (area) {
+            updateDoc.$set = {
+                area: mongoose.Types.ObjectId.isValid(area) ? area : (await Area.findOne({id: area}))._id
+            }
+        }
+        if (name) {
+            updateDoc.$set = {
+                name
+            }
+        }
+        await Item.updateOne(queryDoc, updateDoc)
+        const newDocument = await Item.findOne(queryDoc)
+        Success(res, {
+            body: {
+                changes: newDocument
+            }
+        })
+    } catch (error) {
+        Error(res, {error})
     }
 })
 
@@ -211,6 +245,15 @@ app.delete('/area', async (req, res) => {
             }, {
                 $set: {
                     area: null
+                }
+            })
+            Area.updateMany({
+                children: {
+                    $all: mongoose.Types.ObjectId(doc._id)
+                }
+            }, {
+                $pull: {
+                    children: mongoose.Types.ObjectId(doc._id)
                 }
             })
             if (doc && doc.children.length > 0) {

@@ -51,7 +51,7 @@ module.exports = {
             code
         })
     },
-    Success(res, {message, code = 200, body = {}}) {
+    Success(res, {message = '', code = 200, body = {}}) {
         res.status(code).send({
             status: 'success',
             message,
