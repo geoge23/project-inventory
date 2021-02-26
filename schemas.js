@@ -7,6 +7,7 @@ module.exports = {
         id: { type: Number, unique: true, required: true },
         name: { type: String, required: true, text: true },
         quantity: { type: Number, default: 1 },
+        available: { type: Number, default: 1 },
         checkoutHistory: [{
             userID: { type: Schema.Types.ObjectId, ref: 'users' },
             time: { type: Date, default: Date.now() },
@@ -28,10 +29,10 @@ module.exports = {
     Tag: mongoose.model('tags', {
         name: { type: String, unique: true, required: true }
     }),
-    User: mongoose.model('users', {
-        name: String,
-        id: Number
-    }),
+    // User: mongoose.model('users', {
+    //     name: String,
+    //     id: Number
+    // }),
     Error(res, {message = 'An internal error has occured', code = 500, error = {}}) {
         if (error instanceof mongooseError.ValidationError) {
             code = 400;
@@ -41,6 +42,12 @@ module.exports = {
             message = 'This element already exists';
         } else if (error.toString().indexOf('Couldn\'t find tag') != -1) {
             code = 400;
+            message = error.toString()
+        } else if (error.toString().indexOf(`Cannot read property '_id' of null`) != -1) {
+            code = 400;
+            message = 'Cannot find object with that ID'
+        } else if (error.toString().indexOf('Checkin mismatch with current state') != -1) {
+            code = 409;
             message = error.toString()
         } else {
             console.log(error.toString(), error.stack)

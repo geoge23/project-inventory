@@ -1,8 +1,9 @@
 const express = require('express')
 const mongoose = require('mongoose')
 require('dotenv').config()
-const {Item, Area, Tag, User, Error, Success} = require('./schemas')
+const {Item, Area, Tag, User, Error: HttpError, Success: HttpSuccess} = require('./schemas')
 const { parseTags, parseID } = require('./functions')
+const { query } = require('express')
 
 mongoose.connect(process.env.MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true })
 
@@ -20,19 +21,20 @@ app.put('/item', async (req, res) => {
             id,
             name,
             quantity,
+            available: quantity,
             tags: parsedTags,
             meta,
             area
         })
         await item.save()
-        Success(res, {
+        HttpSuccess(res, {
             code: 201,
             body: {
                 created: item
             }
         })
     } catch (e) {
-        Error(res, {
+        HttpError(res, {
             error: e,
             message: e.toString()
         })
@@ -66,13 +68,13 @@ app.get('/item', async (req, res) => {
             }
         }
         const items = await Item.find(queryDoc)
-        Success(res, {
+        HttpSuccess(res, {
             body: {
                 response: items
             }
         })
     } catch (e) {
-        Error(res, {
+        HttpError(res, {
             error: e
         })
     }
@@ -80,35 +82,40 @@ app.get('/item', async (req, res) => {
 
 app.patch('/item', async (req, res) => {
     try {
-        let { id, tags, area, name } = req.body;
+        let { id, tags, area, name, meta, quantity } = req.body;
         const queryDoc = {}
         parseID(id, queryDoc)
-        const updateDoc = {}
+        const updateDoc = {$set: {}, $addToSet: {}}
         if (tags && tags instanceof Array) {
             const newTags = await parseTags(tags)
-            updateDoc.$addToSet = {
-                tags: newTags
-            }
+            updateDoc.$addToSet.tags = newTags
+        }
+        if (Number.isInteger(quantity)) {
+            updateDoc.$set.quantity = quantity
         }
         if (area) {
-            updateDoc.$set = {
-                area: mongoose.Types.ObjectId.isValid(area) ? area : (await Area.findOne({id: area}))._id
-            }
+            updateDoc.$set.area = mongoose.Types.ObjectId.isValid(area) ? area : (await Area.findOne({id: area}))._id
         }
         if (name) {
-            updateDoc.$set = {
-                name
+            updateDoc.$set.name = name
+        }
+        if (meta && meta instanceof Object) {
+            for (const metaQuery in meta) {
+                updateDoc.$set[`meta.${metaQuery}`] = meta[metaQuery]
             }
+        }
+        if (quantity) {
+            updateDoc.$set.quantity = quantity
         }
         await Item.updateOne(queryDoc, updateDoc)
         const newDocument = await Item.findOne(queryDoc)
-        Success(res, {
+        HttpSuccess(res, {
             body: {
                 changes: newDocument
             }
         })
     } catch (error) {
-        Error(res, {error})
+        HttpError(res, {error})
     }
 })
 
@@ -117,7 +124,7 @@ app.put('/tag', async (req, res) => {
         const { name } = req.body;
         const tag = new Tag({name})
         const {_id: id} = await tag.save();
-        Success(res, {
+        HttpSuccess(res, {
             code: 201,
             body: {
                 created: id
@@ -125,7 +132,7 @@ app.put('/tag', async (req, res) => {
             message: 'Tag was created'
         })
     } catch (e) {
-        Error(res, {
+        HttpError(res, {
             error: e
         })
     }
@@ -141,14 +148,14 @@ app.get('/tag', async (req, res) => {
             queryDoc._id = mongoose.Types.ObjectId(req.body.id)
         }
         const tags = await Tag.find(queryDoc)
-        Success(res, {
+        HttpSuccess(res, {
             code: 200,
             body: {
                 response: tags
             }
         })
     } catch (e) {
-        Error(res, {
+        HttpError(res, {
             error: e
         })
     }
@@ -176,11 +183,11 @@ app.delete('/tag', async (req, res) => {
             }
         })
         await Tag.deleteOne(tag)
-        Success(res, {
+        HttpSuccess(res, {
             message: `Tag ${id} deleted`
         })
     } catch (error) {
-        Error(res, {error})
+        HttpError(res, {error})
     }
 })
 
@@ -210,13 +217,13 @@ app.put('/area', async (req, res) => {
                 }
             })
         }
-        Success(res, {
+        HttpSuccess(res, {
             body: {
                 created: newDoc
             }
         })
     } catch (error) {
-        Error(res, {
+        HttpError(res, {
             error
         })
     }
@@ -234,7 +241,7 @@ app.delete('/area', async (req, res) => {
         const recursiveDelete = async (docQuery) => {
             const doc = await Area.findOne(docQuery)
             if (!doc) {
-                Error(res, {
+                HttpError(res, {
                     message: 'Area doesn\'t exist',
                     code: 400
                 })
@@ -266,11 +273,11 @@ app.delete('/area', async (req, res) => {
             await Area.deleteOne(doc)
         }
         await recursiveDelete(queryDoc)
-        Success(res, {
+        HttpSuccess(res, {
             message: `Deleted doc(s)`
         })
     } catch (error) {
-        Error(res, {
+        HttpError(res, {
             error
         })
     }
@@ -300,16 +307,40 @@ app.get('/area', async (req, res) => {
             }
         }
         const response = await Area.find(queryDoc)
-        Success(res, {
+        HttpSuccess(res, {
             body: {
                 response
             }
         })
     } catch (error) {
-        Error(res, {
-            error
-        })
+        HttpError(res, {error})
     }
+})
+
+app.post('/updateStock', async (req, res) => {
+    try {
+        const queryDoc = {}
+        const { quantity, user_id, checking, id } = req.body
+        if (!(Number.isInteger(quantity) && quantity > 0)) throw new Error('Invalid quantity')
+        parseID(id, queryDoc)
+        const itemDoc = await Item.findOne(queryDoc);
+        const checkVar = (itemDoc.available) + (checking == 'in' ? quantity : -quantity);
+        if (checkVar < 0 || checkVar > itemDoc.quantity) throw new Error(`Checkin mismatch with current state: Proposed value ${checkVar} not in range 0-${itemDoc.quantity}`)
+        await Item.updateOne(queryDoc, {
+            $push: {
+                checkoutHistory: {
+                    quantity,
+                    user_id,
+                    checking,
+                    time: Date.now()
+                }
+            },
+            $inc: {
+                available: checking == 'in' ? quantity : -quantity
+            }
+        })
+        HttpSuccess(res, {message: `User ${user_id} successfully checked ${checking} ${quantity} item(s)`})
+    } catch (error) {HttpError(res, {error})}
 })
 
 app.listen(process.env.PORT || 8080)
